@@ -1,0 +1,15 @@
+# 认证配置
+auth:
+  # 生成相关接口的token列表
+  generate_tokens:
+    - "your-generate-token-1"
+    - "your-generate-token-2"
+  # 模型管理相关接口的token列表
+  model_tokens:
+    - "your-model-token-1"
+    - "your-model-token-2"
+
+# 服务配置
+service:
+  # Ollama服务的基础URL
+  base_url: "http://localhost:11434"
