@@ -204,10 +204,14 @@ service:
 
 ### 生成接口
 
+### OpenAI 风格接口
+
+所有接口都需要在请求头中携带 `Authorization` Token 进行认证，使用 `generate_tokens` 中的token。
+
 #### 1. 聊天接口
 
 - 请求方法：POST
-- 请求路径：/api/chat
+- 请求路径：/v1/chat/completions
 - 请求头：
 
   ```json
@@ -227,10 +231,8 @@ service:
       }
     ],
     "stream": true,
-    "options": {
-      "temperature": 0.7,
-      "top_p": 0.9
-    }
+    "temperature": 0.7,
+    "top_p": 0.9
   }
   ```
 
@@ -238,20 +240,25 @@ service:
 
   ```json
   {
+    "id": "chatcmpl-123",
+    "object": "chat.completion",
+    "created": 1677652288,
     "model": "llama2",
-    "created_at": "2024-01-20T12:00:00Z",
-    "message": {
-      "role": "assistant",
-      "content": "你好！很高兴见到你。"
-    },
-    "done": false
+    "choices": [{
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "你好！很高兴见到你。"
+      },
+      "finish_reason": "stop"
+    }]
   }
   ```
 
 #### 2. 生成接口
 
 - 请求方法：POST
-- 请求路径：/api/generate
+- 请求路径：/v1/completions
 - 请求头：
 
   ```json
@@ -266,10 +273,8 @@ service:
     "model": "llama2",
     "prompt": "讲个故事",
     "stream": true,
-    "options": {
-      "temperature": 0.7,
-      "top_p": 0.9
-    }
+    "temperature": 0.7,
+    "top_p": 0.9
   }
   ```
 
@@ -277,17 +282,22 @@ service:
 
   ```json
   {
+    "id": "cmpl-123",
+    "object": "text_completion",
+    "created": 1677652288,
     "model": "llama2",
-    "created_at": "2024-01-20T12:00:00Z",
-    "response": "从前有座山...",
-    "done": false
+    "choices": [{
+      "text": "从前有座山...",
+      "index": 0,
+      "finish_reason": "stop"
+    }]
   }
   ```
 
 #### 3. Embeddings接口
 
 - 请求方法：POST
-- 请求路径：/api/embeddings
+- 请求路径：/v1/embeddings
 - 请求头：
 
   ```json
@@ -300,10 +310,23 @@ service:
   ```json
   {
     "model": "llama2",
-    "prompt": "Hello World",
-    "options": {
-      "temperature": 0.7
-    }
+    "input": "Hello World"
+  }
+  ```
+
+- 响应示例：
+
+  ```json
+  {
+    "object": "list",
+    "data": [
+      {
+        "object": "embedding",
+        "embedding": [0.1, 0.2, 0.3, ...],
+        "index": 0
+      }
+    ],
+    "model": "llama2"
   }
   ```
 
@@ -316,10 +339,61 @@ service:
   }
   ```
 
-## 错误码说明
+## 错误处理
 
-- 401: 认证失败（Token 无效或未提供）
-- 500: 服务器内部错误
+### 错误响应格式
+
+所有的错误响应都遵循以下统一格式：
+
+```json
+{
+  "code": 500,
+  "message": "错误信息描述",
+  "data": null
+}
+```
+
+### 错误码列表
+
+| 错误码 | 说明 | 处理建议 |
+|--------|------|----------|
+| 401 | 认证失败 | 检查 Token 是否有效或是否已提供 |
+| 500 | 服务器内部错误 | 检查服务器日志，确认 Ollama 服务是否正常运行 |
+
+### 常见错误处理
+
+1. **认证失败**
+   - 确保请求头中包含 `Authorization` 字段
+   - 验证 Token 是否在 config.yaml 中正确配置
+   - 区分使用场景，模型管理接口使用 model_tokens，生成接口使用 generate_tokens
+
+2. **模型相关错误**
+   - 拉取模型失败时，检查网络连接和磁盘空间
+   - 模型不存在时，确认模型名称是否正确，必要时重新拉取
+   - 模型生成超时，考虑调整请求参数或检查服务器负载
+
+3. **服务异常处理**
+   - 定期检查服务日志
+   - 监控服务资源使用情况
+   - 配置适当的重试策略
+   - 在客户端实现错误重试机制
+
+### 最佳实践
+
+1. **错误重试**
+   - 对于网络类错误（502、504），建议实现指数退避重试
+   - 避免对客户端错误（400、401、403）进行重试
+   - 设置合理的重试次数和超时时间
+
+2. **日志记录**
+   - 记录详细的错误信息和请求上下文
+   - 包含时间戳和请求ID
+   - 定期检查和分析错误日志
+
+3. **监控告警**
+   - 监控服务可用性和响应时间
+   - 设置错误率阈值告警
+   - 关注异常流量和资源使用
 
 ## 项目结构
 
