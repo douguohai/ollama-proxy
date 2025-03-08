@@ -1,6 +1,6 @@
 # Ollama Proxy
 
-一个基于 Gin 框架的 Ollama API 代理服务，提供认证和请求转发功能。
+一个基于 Gin 框架的 Ollama API 代理服务，提供认证和请求转发功能，同时支持 OpenAI 风格的 API 接口。
 
 ## 功能特点
 
@@ -9,6 +9,8 @@
 - 支持跨域请求
 - 完整的错误处理
 - 支持所有 Ollama API 接口
+- 支持 OpenAI 风格的 API 接口
+- 日志记录功能（记录请求信息、错误信息等）
 
 ## 配置文件
 
@@ -19,27 +21,47 @@ auth:
   generate_tokens:    # 生成相关接口的token列表
     - "your-generate-token-1"
     - "your-generate-token-2"
-  model_tokens:       # 模型管理相关接口的token列表
-    - "your-model-token-1"
-    - "your-model-token-2"
 service:
   base_url: "http://localhost:11434"  # Ollama 服务地址
 ```
 
+## 运行方式
+
+1. 确保已安装 Go 环境
+2. 配置 `config.yaml` 文件
+3. 运行服务：
+
+```bash
+go run .
+```
+
+服务默认运行在 8080 端口。
+
+## 日志功能
+
+系统会自动记录以下信息：
+
+- 所有API请求的访问日志
+- 认证失败的错误日志
+- 代理转发过程中的错误日志
+- 系统运行状态日志
+
+日志文件存储在项目根目录下的 `logs` 文件夹中。
+
 ## API 接口文档
 
-所有接口都需要在请求头中携带 `Authorization` Token 进行认证。模型管理接口需要使用 `model_tokens` 中的token，生成相关接口需要使用 `generate_tokens` 中的token。
+所有接口都需要在请求头中携带 `Authorization` Token 进行认证，使用 `generate_tokens` 中的token。
 
-### 模型管理接口
+### Ollama 原生接口
 
 #### 1. 获取模型列表
 
 - 请求方法：GET
-- 请求路径：/sys/tags
+- 请求路径：/api/tags
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -48,11 +70,23 @@ service:
   ```json
   {
     "models": [
-      {
-        "name": "llama2",
-        "modified_at": "2024-01-20T12:00:00Z",
-        "size": 4000000000
-      }
+        {
+            "name": "deepseek-r1:32b",
+            "model": "deepseek-r1:32b",
+            "modified_at": "2025-02-26T22:08:41.599376152+08:00",
+            "size": 19851337640,
+            "digest": "38056bbcbb2d068501ecb2d5ea9cea9dd4847465f1ab88c4d4a412a9f7792717",
+            "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": "qwen2",
+                "families": [
+                    "qwen2"
+                ],
+                "parameter_size": "32.8B",
+                "quantization_level": "Q4_K_M"
+            }
+        }
     ]
   }
   ```
@@ -60,11 +94,11 @@ service:
 #### 2. 拉取模型
 
 - 请求方法：POST
-- 请求路径：/sys/pull
+- 请求路径：/api/pull
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -89,11 +123,11 @@ service:
 #### 3. 删除模型
 
 - 请求方法：DELETE
-- 请求路径：/sys/delete
+- 请求路径：/api/delete
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -116,11 +150,11 @@ service:
 #### 4. 复制模型
 
 - 请求方法：POST
-- 请求路径：/sys/copy
+- 请求路径：/api/copy
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -144,11 +178,11 @@ service:
 #### 5. 推送模型
 
 - 请求方法：POST
-- 请求路径：/sys/push
+- 请求路径：/api/push
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -173,12 +207,12 @@ service:
 
 #### 6. 查看模型详情
 
-- 请求方法：POST
-- 请求路径：/sys/show
+- 请求方法：GET
+- 请求路径：/api/show
 - 请求头：
 
   ```json
-  Authorization: your-model-token
+  Authorization: your-generate-token
   Content-Type: application/json
   ```
 
@@ -202,16 +236,35 @@ service:
   }
   ```
 
-### 生成接口
-
-### OpenAI 风格接口
-
-所有接口都需要在请求头中携带 `Authorization` Token 进行认证，使用 `generate_tokens` 中的token。
-
-#### 1. 聊天接口
+#### 7. 生成文本
 
 - 请求方法：POST
-- 请求路径：/v1/chat/completions
+- 请求路径：/api/generate
+- 请求头：
+
+  ```json
+  Authorization: your-generate-token
+  Content-Type: application/json
+  ```
+
+- 请求体：
+
+  ```json
+  {
+    "model": "llama2",
+    "prompt": "讲个故事",
+    "stream": true,
+    "options": {
+      "temperature": 0.7,
+      "top_p": 0.9
+    }
+  }
+  ```
+
+#### 8. 聊天
+
+- 请求方法：POST
+- 请求路径：/api/chat
 - 请求头：
 
   ```json
@@ -231,73 +284,17 @@ service:
       }
     ],
     "stream": true,
-    "temperature": 0.7,
-    "top_p": 0.9
+    "options": {
+      "temperature": 0.7,
+      "top_p": 0.9
+    }
   }
   ```
 
-- 响应示例：
-
-  ```json
-  {
-    "id": "chatcmpl-123",
-    "object": "chat.completion",
-    "created": 1677652288,
-    "model": "llama2",
-    "choices": [{
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "你好！很高兴见到你。"
-      },
-      "finish_reason": "stop"
-    }]
-  }
-  ```
-
-#### 2. 生成接口
+#### 9. 嵌入向量
 
 - 请求方法：POST
-- 请求路径：/v1/completions
-- 请求头：
-
-  ```json
-  Authorization: your-generate-token
-  Content-Type: application/json
-  ```
-
-- 请求体：
-
-  ```json
-  {
-    "model": "llama2",
-    "prompt": "讲个故事",
-    "stream": true,
-    "temperature": 0.7,
-    "top_p": 0.9
-  }
-  ```
-
-- 响应示例：
-
-  ```json
-  {
-    "id": "cmpl-123",
-    "object": "text_completion",
-    "created": 1677652288,
-    "model": "llama2",
-    "choices": [{
-      "text": "从前有座山...",
-      "index": 0,
-      "finish_reason": "stop"
-    }]
-  }
-  ```
-
-#### 3. Embeddings接口
-
-- 请求方法：POST
-- 请求路径：/v1/embeddings
+- 请求路径：/api/embed
 - 请求头：
 
   ```json
@@ -318,6 +315,242 @@ service:
 
   ```json
   {
+    "embedding": [0.1, 0.2, 0.3, ...],
+    "model": "llama2"
+  }
+  ```
+
+### OpenAI 风格接口
+
+所有接口都需要在请求头中携带 `Authorization` Token 进行认证，使用 `generate_tokens` 中的token。
+
+#### 1. 聊天接口
+
+- 请求方法：POST
+- 请求路径：/v1/chat/completions
+- 请求头：
+
+  ```json
+  Authorization: your-generate-token
+  Content-Type: application/json
+  ```
+
+- 请求参数结构：
+
+  ```json
+  {
+    "model": "string",       // 模型名称
+    "messages": [            // 对话消息列表
+      {
+        "role": "string",    // 角色：user/assistant
+        "content": "string"  // 消息内容
+      }
+    ],
+    "stream": boolean,       // 是否流式输出
+    "temperature": number,   // 温度参数
+    "top_p": number,         // Top-p采样参数
+    "max_tokens": number,    // 最大生成token数
+    "n": number,             // 生成数量
+    "stop": ["string"],      // 停止词
+    "presence_penalty": number,  // 存在惩罚
+    "frequency_penalty": number, // 频率惩罚
+    "logit_bias": {},        // 逻辑偏差
+    "user": "string",        // 用户标识
+    "options": {             // 选项
+      "temperature": number,
+      "top_p": number
+    }
+  }
+  ```
+
+- 请求示例：
+
+  ```json
+  {
+    "model": "llama2",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好"
+      }
+    ],
+    "stream": true,
+    "temperature": 0.7,
+    "top_p": 0.9
+  }
+  ```
+
+- 响应参数结构：
+
+  ```json
+  {
+    "id": "string",      // 响应ID
+    "object": "string",  // 对象类型
+    "created": number,   // 创建时间
+    "model": "string",   // 模型名称
+    "choices": [         // 生成的选项列表
+      {
+        "message": {      // 生成的消息
+          "role": "string",
+          "content": "string"
+        },
+        "index": number,        // 选项索引
+        "finish_reason": "string" // 结束原因
+      }
+    ],
+    "usage": {           // 使用统计
+      "prompt_tokens": number,
+      "completion_tokens": number,
+      "total_tokens": number
+    }
+  }
+  ```
+
+- 响应示例：
+
+  ```json
+  {
+    "id": "chatcmpl-123",
+    "object": "chat.completion",
+    "created": 1677652288,
+    "model": "llama2",
+    "choices": [{
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "你好！高兴见到你。"
+      },
+      "finish_reason": "stop"
+    }],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 20,
+      "total_tokens": 30
+    }
+  }
+  ```
+
+#### 2. 生成接口
+
+- 请求方法：POST
+- 请求路径：/v1/completions
+- 请求头：
+
+  ```json
+  Authorization: your-generate-token
+  Content-Type: application/json
+  ```
+
+- 请求参数结构：
+
+  ```json
+  {
+    "model": "string",       // 模型名称
+    "prompt": "string",      // 提示文本
+    "stream": boolean,       // 是否流式输出
+    "temperature": number,   // 温度参数
+    "top_p": number,         // Top-p采样参数
+    "max_tokens": number,    // 最大生成token数
+    "n": number,             // 生成数量
+    "stop": ["string"],      // 停止词
+    "presence_penalty": number,  // 存在惩罚
+    "frequency_penalty": number, // 频率惩罚
+    "logprobs": number,      // 日志概率
+    "best_of": number,       // 最佳数量
+    "user": "string",        // 用户标识
+    "options": {             // 选项
+      "temperature": number,
+      "top_p": number
+    }
+  }
+  ```
+
+- 请求示例：
+
+  ```json
+  {
+    "model": "llama2",
+    "prompt": "讲个故事",
+    "stream": true,
+    "temperature": 0.7,
+    "top_p": 0.9
+  }
+  ```
+
+- 响应示例：
+
+  ```json
+  {
+    "id": "cmpl-123",
+    "object": "text_completion",
+    "created": 1677652288,
+    "model": "llama2",
+    "choices": [{
+      "text": "从前有一座山，山上有一座庙，庙里有一个老和尚在讲故事...",
+      "index": 0,
+      "finish_reason": "stop"
+    }],
+    "usage": {
+      "prompt_tokens": 5,
+      "completion_tokens": 25,
+      "total_tokens": 30
+    }
+  }
+  ```
+
+#### 3. 嵌入向量接口
+
+- 请求方法：POST
+- 请求路径：/v1/embeddings
+- 请求头：
+
+  ```json
+  Authorization: your-generate-token
+  Content-Type: application/json
+  ```
+
+- 请求参数结构：
+
+  ```json
+  {
+    "model": "string",    // 模型名称
+    "input": "string"     // 输入文本
+  }
+  ```
+
+- 请求示例：
+
+  ```json
+  {
+    "model": "llama2",
+    "input": "Hello World"
+  }
+  ```
+
+- 响应参数结构：
+
+  ```json
+  {
+    "object": "string",   // 对象类型
+    "data": [             // 嵌入向量数据
+      {
+        "object": "string",  // 对象类型
+        "embedding": [number],  // 嵌入向量
+        "index": number      // 索引
+      }
+    ],
+    "model": "string",    // 模型名称
+    "usage": {           // 使用统计
+      "prompt_tokens": number,
+      "total_tokens": number
+    }
+  }
+  ```
+
+- 响应示例：
+
+  ```json
+  {
     "object": "list",
     "data": [
       {
@@ -326,114 +559,58 @@ service:
         "index": 0
       }
     ],
-    "model": "llama2"
+    "model": "llama2",
+    "usage": {
+      "prompt_tokens": 2,
+      "total_tokens": 2
+    }
   }
   ```
 
-- 响应示例：
+## 部署方式
 
-  ```json
-  {
-    "embedding": [0.1, 0.2, 0.3, ...],
-    "model": "llama2"
-  }
-  ```
+### Docker 部署
 
-## 错误处理
-
-### 错误响应格式
-
-所有的错误响应都遵循以下统一格式：
-
-```json
-{
-  "code": 500,
-  "message": "错误信息描述",
-  "data": null
-}
-```
-
-### 错误码列表
-
-| 错误码 | 说明 | 处理建议 |
-|--------|------|----------|
-| 401 | 认证失败 | 检查 Token 是否有效或是否已提供 |
-| 500 | 服务器内部错误 | 检查服务器日志，确认 Ollama 服务是否正常运行 |
-
-### 常见错误处理
-
-1. **认证失败**
-   - 确保请求头中包含 `Authorization` 字段
-   - 验证 Token 是否在 config.yaml 中正确配置
-   - 区分使用场景，模型管理接口使用 model_tokens，生成接口使用 generate_tokens
-
-2. **模型相关错误**
-   - 拉取模型失败时，检查网络连接和磁盘空间
-   - 模型不存在时，确认模型名称是否正确，必要时重新拉取
-   - 模型生成超时，考虑调整请求参数或检查服务器负载
-
-3. **服务异常处理**
-   - 定期检查服务日志
-   - 监控服务资源使用情况
-   - 配置适当的重试策略
-   - 在客户端实现错误重试机制
-
-### 最佳实践
-
-1. **错误重试**
-   - 对于网络类错误（502、504），建议实现指数退避重试
-   - 避免对客户端错误（400、401、403）进行重试
-   - 设置合理的重试次数和超时时间
-
-2. **日志记录**
-   - 记录详细的错误信息和请求上下文
-   - 包含时间戳和请求ID
-   - 定期检查和分析错误日志
-
-3. **监控告警**
-   - 监控服务可用性和响应时间
-   - 设置错误率阈值告警
-   - 关注异常流量和资源使用
-
-## 项目结构
-
-```txt
-.
-├── main.go         # 主程序入口
-├── config.yaml     # 配置文件
-└── README.md       # 项目文档
-
-```
-
-## Docker 部署
-
-### 构建镜像
+1. 构建 Docker 镜像：
 
 ```bash
 docker build -t ollama-proxy .
 ```
 
-### 运行容器
+2. 运行容器：
 
 ```bash
-docker run -d \
-  -p 8080:8080 \
-  -v /path/to/your/config.yaml:/app/config.yaml \
-  --name ollama-proxy \
-  ollama-proxy
+docker run -d -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml ollama-proxy
 ```
 
-### 环境变量说明
+### 二进制部署
 
-容器内已配置以下环境变量：
+1. 编译项目：
 
-- `GO111MODULE=on`: 启用Go模块
-- `CGO_ENABLED=0`: 禁用CGO
-- `GOOS=linux`: 目标操作系统
-- `GOARCH=amd64`: 目标架构
+```bash
+go build -o ollama-proxy
+```
 
-### 注意事项
+2. 运行服务：
 
-1. 运行容器时需要将本地的`config.yaml`文件挂载到容器的`/app/config.yaml`
-2. 确保`config.yaml`中的`base_url`配置正确指向Ollama服务地址
-3. 容器默认暴露8080端口，可以根据需要修改端口映射
+```bash
+./ollama-proxy
+```
+
+## 常见问题
+
+1. **认证失败**
+   - 检查 `config.yaml` 中的 `generate_tokens` 配置是否正确
+   - 确保请求头中包含正确的 `Authorization` 信息（不带Bearer前缀）
+   - 系统会返回 "未提供认证token" 或 "非授权访问" 的错误信息
+
+2. **无法连接到 Ollama 服务**
+   - 检查 Ollama 服务是否正常运行
+   - 确认 `config.yaml` 中的 `base_url` 配置是否正确（默认为 "http://localhost:11434"）
+   - 系统会返回 "Failed to connect to Ollama service" 的错误信息
+
+3. **流式输出不正常**
+   - 确保客户端支持 SSE (Server-Sent Events) 格式
+   - 检查请求体中 `stream` 参数是否设置为 `true`
+   - 确保网络连接稳定，避免连接中断
+   - 如果使用OpenAI风格API，确保正确处理流式响应格式

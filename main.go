@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -28,7 +31,17 @@ const (
 	configFile = "config.yaml"
 )
 
+var logger *Logger
+
 func main() {
+	// 初始化日志记录器
+	var err error
+	logger, err = NewLogger()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
 	// 读取配置文件
 	config, err := loadConfig()
 	if err != nil {
@@ -37,14 +50,14 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Logger())
+	// 添加日志中间件
+	r.Use(logMiddleware())
 	// 添加全局异常处理
 	r.Use(func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
 				c.JSON(http.StatusOK, gin.H{
-					"code": 500,
-					"msg":  "服务器内部错误",
-					"data": nil,
+					"error": "服务器内部错误",
 				})
 				c.Abort()
 			}
@@ -62,25 +75,19 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// 系统管理路由组，用于模型管理
-	sys := r.Group("/sys", authMiddleware(*config))
-	{
-		// 模型相关接口
-		sys.GET("/tags", proxyOllama("/api/tags"))
-		sys.POST("/pull", proxyOllama("/api/pull"))
-		sys.DELETE("/delete", proxyOllama("/api/delete"))
-		sys.POST("/copy", proxyOllama("/api/copy"))
-		sys.POST("/push", proxyOllama("/api/push"))
-		sys.GET("/show", proxyOllama("/api/show"))
-	}
-
 	// API路由组，用于生成相关功能
 	api := r.Group("/api", authMiddleware(*config))
 	{
 		// 生成相关接口
 		api.POST("/generate", proxyOllama("/api/generate"))
 		api.POST("/chat", proxyOllama("/api/chat"))
-		api.POST("/embeddings", proxyOllama("/api/embeddings"))
+		api.POST("/embed", proxyOllama("/api/embed"))
+		api.GET("/tags", proxyOllama("/api/tags"))
+		api.POST("/pull", proxyOllama("/api/pull"))
+		api.DELETE("/delete", proxyOllama("/api/delete"))
+		api.POST("/copy", proxyOllama("/api/copy"))
+		api.POST("/push", proxyOllama("/api/push"))
+		api.GET("/show", proxyOllama("/api/show"))
 	}
 
 	// OpenAI风格的API路由组
@@ -119,9 +126,7 @@ func authMiddleware(config Config) gin.HandlerFunc {
 		token := c.GetHeader("Authorization")
 		if token == "" {
 			c.JSON(http.StatusOK, gin.H{
-				"code": 401,
-				"msg":  "未提供认证token",
-				"data": nil,
+				"error": "未提供认证token",
 			})
 			c.Abort()
 			return
@@ -129,23 +134,7 @@ func authMiddleware(config Config) gin.HandlerFunc {
 
 		// 根据路由组判断使用哪种token验证
 		validToken := false
-		if strings.HasPrefix(c.Request.URL.Path, "/sys") {
-			// 系统管理接口使用模型管理token
-			for _, allowedToken := range config.Auth.ModelTokens {
-				if token == allowedToken {
-					validToken = true
-					break
-				}
-			}
-		} else if strings.HasPrefix(c.Request.URL.Path, "/api") {
-			// 生成相关接口使用生成token
-			for _, allowedToken := range config.Auth.GenerateTokens {
-				if token == allowedToken {
-					validToken = true
-					break
-				}
-			}
-		} else if strings.HasPrefix(c.Request.URL.Path, "/v1") {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") || strings.HasPrefix(c.Request.URL.Path, "/v1") {
 			// 生成相关接口使用生成token
 			for _, allowedToken := range config.Auth.GenerateTokens {
 				if token == allowedToken {
@@ -157,9 +146,7 @@ func authMiddleware(config Config) gin.HandlerFunc {
 
 		if !validToken {
 			c.JSON(http.StatusOK, gin.H{
-				"code": 401,
-				"msg":  "非授权访问",
-				"data": nil,
+				"error": "非授权访问",
 			})
 			c.Abort()
 			return
@@ -172,68 +159,240 @@ func authMiddleware(config Config) gin.HandlerFunc {
 // proxyOllama 创建一个代理处理函数
 // OpenAI风格的API处理函数
 func handleOpenAIChat(c *gin.Context) {
-	var req OpenAIChatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var openAIReq OpenAIChatRequest
+	if err := c.ShouldBindJSON(&openAIReq); err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
 
 	// 转换为Ollama请求格式
 	ollamaReq := OllamaChatRequest{
-		Model:    req.Model,
-		Messages: req.Messages,
-		Stream:   req.Stream,
-		Options:  req.Options,
+		Model:    openAIReq.Model,
+		Messages: openAIReq.Messages,
+		Stream:   openAIReq.Stream,
+		Options:  openAIReq.Options,
 	}
 
-	// 发送请求到Ollama服务
+	if openAIReq.Stream {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+
+		// 创建HTTP客户端和请求
+		config, err := loadConfig()
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+
+		baseURL := "http://localhost:11434"
+		if config.Service.BaseURL != "" {
+			baseURL = config.Service.BaseURL
+		}
+
+		// 将请求数据转换为JSON
+		jsonData, err := json.Marshal(ollamaReq)
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+
+		// 创建请求
+		req, err := http.NewRequest("POST", baseURL+"/api/chat", strings.NewReader(string(jsonData)))
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Connection", "keep-alive")
+
+		// 发送请求
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+
+		// 读取流式响应
+		reader := bufio.NewReader(resp.Body)
+
+		c.Stream(func(w io.Writer) bool {
+			line, err := reader.ReadBytes('\n')
+			if err != nil {
+				if err != io.EOF {
+					c.SSEvent("error", gin.H{"error": fmt.Sprintf("读取响应流出错: %v", err)})
+				}
+				return false
+			}
+
+			// 跳过空行
+			if len(bytes.TrimSpace(line)) == 0 {
+				return true
+			}
+
+			var result map[string]interface{}
+			if err := json.Unmarshal(line, &result); err != nil {
+				return true
+			}
+
+			// 转换为OpenAI流式响应格式
+			openaiResp := ConvertOllamaChatStreamResponse(result, ollamaReq.Model)
+			jsonData, err := json.Marshal(openaiResp)
+			if err != nil {
+				c.SSEvent("error", gin.H{"error": err.Error()})
+				return false
+			}
+			c.SSEvent("message", string(jsonData))
+
+			// 检查是否是最后一条消息
+			if done, ok := result["done"].(bool); ok && done {
+				return false
+			}
+
+			return true
+		})
+		return
+	}
+
+	// 非流式请求处理
 	resp, err := sendToOllama("/api/chat", ollamaReq)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaChatResponse(resp, req.Model)
+	openaiResp := ConvertOllamaChatResponse(resp, openAIReq.Model)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
 func handleOpenAICompletion(c *gin.Context) {
-	var req OpenAICompletionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var openAIReq OpenAICompletionRequest
+	if err := c.ShouldBindJSON(&openAIReq); err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
 
 	// 转换为Ollama请求格式
 	ollamaReq := OllamaGenerateRequest{
-		Model:   req.Model,
-		Prompt:  req.Prompt,
-		Stream:  req.Stream,
-		Options: req.Options,
+		Model:   openAIReq.Model,
+		Prompt:  openAIReq.Prompt,
+		Stream:  openAIReq.Stream,
+		Options: openAIReq.Options,
 	}
 
-	// 发送请求到Ollama服务
+	if openAIReq.Stream {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+
+		// 创建HTTP客户端和请求
+		config, err := loadConfig()
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+
+		baseURL := "http://localhost:11434"
+		if config.Service.BaseURL != "" {
+			baseURL = config.Service.BaseURL
+		}
+
+		// 将请求数据转换为JSON
+		jsonData, err := json.Marshal(ollamaReq)
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+
+		// 创建请求
+		req, err := http.NewRequest("POST", baseURL+"/api/generate", strings.NewReader(string(jsonData)))
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Connection", "keep-alive")
+
+		// 发送请求
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			c.SSEvent("error", gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+
+		// 读取流式响应
+		reader := bufio.NewReader(resp.Body)
+
+		c.Stream(func(w io.Writer) bool {
+			line, err := reader.ReadBytes('\n')
+			if err != nil {
+				if err != io.EOF {
+					c.SSEvent("error", gin.H{"error": fmt.Sprintf("读取响应流出错: %v", err)})
+				}
+				return false
+			}
+
+			// 跳过空行
+			if len(bytes.TrimSpace(line)) == 0 {
+				return true
+			}
+
+			var result map[string]interface{}
+			if err := json.Unmarshal(line, &result); err != nil {
+				return true
+			}
+
+			// 转换为OpenAI流式响应格式
+			openaiResp := ConvertOllamaGenerateStreamResponse(result, ollamaReq.Model)
+			jsonData, err := json.Marshal(openaiResp)
+			if err != nil {
+				c.SSEvent("error", gin.H{"error": err.Error()})
+				return false
+			}
+			c.SSEvent("message", string(jsonData))
+
+			// 检查是否是最后一条消息
+			if done, ok := result["done"].(bool); ok && done {
+				return false
+			}
+
+			return true
+		})
+		return
+	}
+
+	// 非流式请求处理
 	resp, err := sendToOllama("/api/generate", ollamaReq)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// 检查响应中是否包含错误信息
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"error": errMsg,
 		})
 		return
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaGenerateResponse(resp, req.Model)
+	openaiResp := ConvertOllamaGenerateResponse(resp, openAIReq.Model)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
@@ -241,24 +400,22 @@ func handleOpenAIEmbedding(c *gin.Context) {
 	var req OpenAIEmbeddingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
 
 	// 转换为Ollama请求格式
 	ollamaReq := OllamaEmbeddingRequest{
-		Model:  req.Model,
-		Prompt: req.Input,
+		Model: req.Model,
+		Input: req.Input,
 	}
 
 	// 发送请求到Ollama服务
-	resp, err := sendToOllama("/api/embeddings", ollamaReq)
+	resp, err := sendToOllama("/api/embed", ollamaReq)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
@@ -268,8 +425,8 @@ func handleOpenAIEmbedding(c *gin.Context) {
 	c.JSON(http.StatusOK, openaiResp)
 }
 
-// 发送请求到Ollama服务的通用函数
-func sendToOllama(path string, data interface{}) (map[string]interface{}, error) {
+// streamFromOllama 处理流式请求的函数
+func streamFromOllama(path string, data interface{}) (map[string]interface{}, error) {
 	config, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -292,6 +449,8 @@ func sendToOllama(path string, data interface{}) (map[string]interface{}, error)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Connection", "keep-alive")
 
 	// 发送请求
 	client := &http.Client{}
@@ -301,9 +460,89 @@ func sendToOllama(path string, data interface{}) (map[string]interface{}, error)
 	}
 	defer resp.Body.Close()
 
+	// 读取流式响应
+	reader := bufio.NewReader(resp.Body)
+	var currentResult map[string]interface{}
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				if currentResult != nil {
+					return currentResult, nil
+				}
+				break
+			}
+			return nil, fmt.Errorf("读取响应流出错: %v", err)
+		}
+
+		// 跳过空行
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(line, &result); err != nil {
+			continue
+		}
+
+		// 更新当前结果
+		currentResult = result
+
+		// 检查是否是最后一条消息
+		if done, ok := result["done"].(bool); ok && done {
+			return currentResult, nil
+		}
+
+		// 返回当前结果，让调用者继续处理流
+		return currentResult, nil
+	}
+
+	return nil, fmt.Errorf("未收到有效的响应数据")
+}
+
+// 发送请求到Ollama服务的通用函数
+func sendToOllama(path string, data interface{}) (map[string]interface{}, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := "http://localhost:11434"
+	if config.Service.BaseURL != "" {
+		baseURL = config.Service.BaseURL
+	}
+
+	// 将请求数据转换为JSON
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// 创建请求
+	req, err := http.NewRequest("POST", baseURL+path, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// 发送请求
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// 读取完整的响应体
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
 	// 解析响应
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, err
 	}
 
@@ -314,12 +553,20 @@ func proxyOllama(path string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		config, err := loadConfig()
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"code": 500,
-				"msg":  "内部服务器错误",
-				"data": nil,
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to load configuration",
 			})
 			return
+		}
+
+		// 检查是否为流式请求
+		var requestBody map[string]interface{}
+		if err := c.ShouldBindJSON(&requestBody); err == nil {
+			if stream, ok := requestBody["stream"].(bool); ok && stream {
+				c.Header("Content-Type", "text/event-stream")
+				c.Header("Cache-Control", "no-cache")
+				c.Header("Connection", "keep-alive")
+			}
 		}
 
 		// 创建代理请求
@@ -327,11 +574,13 @@ func proxyOllama(path string) gin.HandlerFunc {
 		if config.Service.BaseURL != "" {
 			baseURL = config.Service.BaseURL
 		}
-		req, err := http.NewRequest(c.Request.Method, baseURL+path, c.Request.Body)
+
+		// 重新创建请求体
+		jsonData, _ := json.Marshal(requestBody)
+		req, err := http.NewRequest(c.Request.Method, baseURL+path, bytes.NewReader(jsonData))
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"code": 500,
-				"msg":  "内部服务器错误",
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to create request",
 			})
 			return
 		}
@@ -342,14 +591,14 @@ func proxyOllama(path string) gin.HandlerFunc {
 				req.Header.Add(name, value)
 			}
 		}
+		req.Header.Set("Content-Type", "application/json")
 
 		// 发送请求到Ollama服务
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"code": 500,
-				"msg":  "内部服务器错误",
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to connect to Ollama service",
 			})
 			return
 		}
@@ -365,10 +614,73 @@ func proxyOllama(path string) gin.HandlerFunc {
 		// 设置响应状态码
 		c.Status(resp.StatusCode)
 
-		// 复制响应体
-		c.Stream(func(w io.Writer) bool {
-			_, err := io.Copy(w, resp.Body)
-			return err == nil
-		})
+		// 检查是否为流式请求
+		if stream, ok := requestBody["stream"].(bool); ok && stream {
+			// 流式请求使用Stream方式返回
+			c.Stream(func(w io.Writer) bool {
+				_, err := io.Copy(w, resp.Body)
+				return err == nil
+			})
+		} else {
+			// 非流式请求处理
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "Failed to read response body",
+				})
+				return
+			}
+			// 其他接口直接返回原始响应
+			c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+		}
 	}
+}
+
+// logMiddleware 日志中间件
+func logMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 获取请求体
+		var requestBody map[string]interface{}
+		if c.Request.Body != nil {
+			bodyBytes, _ := io.ReadAll(c.Request.Body)
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			json.Unmarshal(bodyBytes, &requestBody)
+		}
+
+		// 检查是否为流式请求
+		isStream := false
+		if stream, ok := requestBody["stream"].(bool); ok {
+			isStream = stream
+		}
+
+		// 如果是流式请求，只记录请求参数
+		if isStream {
+			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, nil, nil)
+			c.Next()
+			return
+		}
+
+		// 创建自定义ResponseWriter以捕获响应
+		blw := &bodyLogWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
+		c.Writer = blw
+
+		c.Next()
+
+		// 解析响应体
+		var response interface{}
+		if err := json.Unmarshal(blw.body.Bytes(), &response); err == nil {
+			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, response, nil)
+		}
+	}
+}
+
+// bodyLogWriter 用于捕获响应体
+type bodyLogWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (w *bodyLogWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
 }
