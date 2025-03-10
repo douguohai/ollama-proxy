@@ -268,6 +268,14 @@ func handleOpenAIChat(c *gin.Context) {
 		return
 	}
 
+	// 检查响应中是否包含错误信息
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"error": errMsg,
+		})
+		return
+	}
+
 	// 转换为OpenAI响应格式
 	openaiResp := ConvertOllamaChatResponse(resp, openAIReq.Model)
 	c.JSON(http.StatusOK, openaiResp)
@@ -405,14 +413,15 @@ func handleOpenAIEmbedding(c *gin.Context) {
 		return
 	}
 
-	// 转换为Ollama请求格式
+	// 直接将OpenAI请求中的输入数组传递给Ollama
 	ollamaReq := OllamaEmbeddingRequest{
 		Model: req.Model,
 		Input: req.Input,
 	}
 
-	// 发送请求到Ollama服务
+	// 发送批量请求到Ollama服务
 	resp, err := sendToOllama("/api/embed", ollamaReq)
+
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"error": err.Error(),
@@ -420,85 +429,37 @@ func handleOpenAIEmbedding(c *gin.Context) {
 		return
 	}
 
+	// 检查响应中是否包含错误信息
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"error": errMsg,
+		})
+		return
+	}
+	// 获取token使用量
+	totalTokens := 0.0
+	if prompt, ok := resp["prompt_eval_count"].(float64); ok {
+		totalTokens = prompt
+	}
+
+	// 获取embeddings数据
+	var allEmbeddings []interface{}
+	if embeddings, ok := resp["embeddings"].([]interface{}); ok {
+		allEmbeddings = embeddings
+	} else if embedding, ok := resp["embedding"].([]interface{}); ok {
+		// 兼容单个embedding的情况
+		allEmbeddings = []interface{}{embedding}
+	}
+
+	// 构造包含所有embeddings的响应
+	combinedResp := map[string]interface{}{
+		"embeddings":        allEmbeddings,
+		"prompt_eval_count": totalTokens,
+	}
+
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaEmbeddingResponse(resp, req.Model)
+	openaiResp := ConvertOllamaEmbeddingResponse(combinedResp, req.Model)
 	c.JSON(http.StatusOK, openaiResp)
-}
-
-// streamFromOllama 处理流式请求的函数
-func streamFromOllama(path string, data interface{}) (map[string]interface{}, error) {
-	config, err := loadConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	baseURL := "http://localhost:11434"
-	if config.Service.BaseURL != "" {
-		baseURL = config.Service.BaseURL
-	}
-
-	// 将请求数据转换为JSON
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	// 创建请求
-	req, err := http.NewRequest("POST", baseURL+path, strings.NewReader(string(jsonData)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Connection", "keep-alive")
-
-	// 发送请求
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// 读取流式响应
-	reader := bufio.NewReader(resp.Body)
-	var currentResult map[string]interface{}
-
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			if err == io.EOF {
-				if currentResult != nil {
-					return currentResult, nil
-				}
-				break
-			}
-			return nil, fmt.Errorf("读取响应流出错: %v", err)
-		}
-
-		// 跳过空行
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-
-		var result map[string]interface{}
-		if err := json.Unmarshal(line, &result); err != nil {
-			continue
-		}
-
-		// 更新当前结果
-		currentResult = result
-
-		// 检查是否是最后一条消息
-		if done, ok := result["done"].(bool); ok && done {
-			return currentResult, nil
-		}
-
-		// 返回当前结果，让调用者继续处理流
-		return currentResult, nil
-	}
-
-	return nil, fmt.Errorf("未收到有效的响应数据")
 }
 
 // 发送请求到Ollama服务的通用函数

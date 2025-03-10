@@ -307,11 +307,24 @@ go run .
   ```json
   {
     "model": "llama2",
-    "input": "Hello World"
+    "input": ["Hello World", "Another text to embed"]
   }
   ```
 
 - 响应示例：
+
+  ```json
+  {
+    "embeddings": [
+      [0.1, 0.2, 0.3, ...],
+      [0.2, 0.3, 0.4, ...]
+    ],
+    "model": "llama2",
+    "prompt_eval_count": 8
+  }
+  ```
+
+  或单个输入的响应：
 
   ```json
   {
@@ -514,7 +527,7 @@ go run .
   ```json
   {
     "model": "string",    // 模型名称
-    "input": "string"     // 输入文本
+    "input": ["string"]   // 输入文本数组，支持批量处理
   }
   ```
 
@@ -523,7 +536,16 @@ go run .
   ```json
   {
     "model": "llama2",
-    "input": "Hello World"
+    "input": ["Hello World", "Another text to embed"]
+  }
+  ```
+
+  或单个输入：
+
+  ```json
+  {
+    "model": "llama2",
+    "input": ["Hello World"]
   }
   ```
 

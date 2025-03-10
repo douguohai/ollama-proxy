@@ -43,9 +43,9 @@ type OpenAICompletionRequest struct {
 
 // OpenAIEmbeddingRequest OpenAI风格的Embedding请求
 type OpenAIEmbeddingRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
-	User  string `json:"user,omitempty"`
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+	User  string   `json:"user,omitempty"`
 }
 
 // ChatMessage 聊天消息结构
@@ -78,8 +78,8 @@ type OllamaGenerateRequest struct {
 
 // OllamaEmbeddingRequest Ollama Embedding请求
 type OllamaEmbeddingRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
+	Model string   `json:"model"`
+	Input []string `json:"input"`
 }
 
 // OpenAIChatResponse OpenAI风格的聊天响应
@@ -316,11 +316,4 @@ func convertToFloat64Slice(data interface{}) []float64 {
 	}
 
 	return result
-}
-
-// OpenAIError OpenAI标准错误格式
-type OpenAIError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
 }
