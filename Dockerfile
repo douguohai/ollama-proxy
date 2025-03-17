@@ -4,8 +4,7 @@ FROM golang:1.21-alpine AS builder
 # 设置Go环境变量
 ENV GO111MODULE=on \
     CGO_ENABLED=0 \
-    GOOS=linux \
-    GOPROXY=https://goproxy.cn,direct
+    GOOS=linux 
 
 # 设置工作目录
 WORKDIR /build
