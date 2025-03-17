@@ -22,7 +22,7 @@ builds:
       - linux
       - windows
       - darwin
-    format: binary
+    binary: true
 
 
 
