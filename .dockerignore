@@ -25,4 +25,9 @@ go.work.sum
 # env file
 .env
 dist
+./.DS_Store
+.vscode
+.idea
+logs
+.github
 
