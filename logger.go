@@ -13,6 +13,8 @@ type LogEntry struct {
 	Timestamp   string                 `json:"timestamp"`
 	Method      string                 `json:"method"`
 	Path        string                 `json:"path"`
+	Token       string                 `json:"token,omitempty"`
+	TokenValid  bool                   `json:"token_valid,omitempty"`
 	RequestBody map[string]interface{} `json:"request_body,omitempty"`
 	Response    interface{}            `json:"response,omitempty"`
 	Error       string                 `json:"error,omitempty"`
@@ -45,11 +47,13 @@ func NewLogger() (*Logger, error) {
 }
 
 // LogRequest 记录请求和响应
-func (l *Logger) LogRequest(method, path string, requestBody map[string]interface{}, response interface{}, err error) {
+func (l *Logger) LogRequest(method, path string, requestBody map[string]interface{}, response interface{}, err error, token string, tokenValid bool) {
 	entry := LogEntry{
 		Timestamp:   time.Now().Format(time.RFC3339),
 		Method:      method,
 		Path:        path,
+		Token:       token,
+		TokenValid:  tokenValid,
 		RequestBody: requestBody,
 	}
 

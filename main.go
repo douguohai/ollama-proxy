@@ -94,6 +94,7 @@ func main() {
 	openai := r.Group("/v1", authMiddleware(*config))
 	{
 		// OpenAI风格的生成相关接口
+		openai.GET("/models", handleOpenAIModels)
 		openai.POST("/chat/completions", handleOpenAIChat)
 		openai.POST("/completions", handleOpenAICompletion)
 		openai.POST("/embeddings", handleOpenAIEmbedding)
@@ -125,6 +126,8 @@ func authMiddleware(config Config) gin.HandlerFunc {
 		// 获取请求头中的token
 		token := c.GetHeader("Authorization")
 		if token == "" {
+			// 记录未提供token的情况
+			logger.LogRequest(c.Request.Method, c.Request.URL.Path, nil, nil, fmt.Errorf("未提供认证token"), "", false)
 			c.JSON(http.StatusOK, gin.H{
 				"error": "未提供认证token",
 			})
@@ -132,8 +135,11 @@ func authMiddleware(config Config) gin.HandlerFunc {
 			return
 		}
 
+		// 检查token是否以Bearer开头，如果是则移除前缀
+		token = strings.TrimPrefix(token, "Bearer ")
+
 		// 根据路由组判断使用哪种token验证
-		validToken := false
+		var validToken = false
 		if strings.HasPrefix(c.Request.URL.Path, "/api") || strings.HasPrefix(c.Request.URL.Path, "/v1") {
 			// 生成相关接口使用生成token
 			for _, allowedToken := range config.Auth.GenerateTokens {
@@ -143,6 +149,9 @@ func authMiddleware(config Config) gin.HandlerFunc {
 				}
 			}
 		}
+
+		// 记录token验证结果
+		logger.LogRequest(c.Request.Method, c.Request.URL.Path, nil, nil, nil, token, validToken)
 
 		if !validToken {
 			c.JSON(http.StatusOK, gin.H{
@@ -462,6 +471,72 @@ func handleOpenAIEmbedding(c *gin.Context) {
 	c.JSON(http.StatusOK, openaiResp)
 }
 
+// handleOpenAIModels 处理OpenAI风格的模型列表请求
+func handleOpenAIModels(c *gin.Context) {
+	// 调用Ollama的tags接口获取模型列表
+	resp, err := sendToOllamaGet("/api/tags")
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// 检查响应中是否包含错误信息
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"error": errMsg,
+		})
+		return
+	}
+
+	// 转换为OpenAI响应格式
+	openaiResp := ConvertOllamaModelsResponse(resp)
+	c.JSON(http.StatusOK, openaiResp)
+}
+
+// 发送GET请求到Ollama服务的函数
+func sendToOllamaGet(path string) (map[string]interface{}, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := "http://localhost:11434"
+	if config.Service.BaseURL != "" {
+		baseURL = config.Service.BaseURL
+	}
+
+	// 创建GET请求
+	req, err := http.NewRequest("GET", baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// 发送请求
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// 读取完整的响应体
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// 解析响应
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // 发送请求到Ollama服务的通用函数
 func sendToOllama(path string, data interface{}) (map[string]interface{}, error) {
 	config, err := loadConfig()
@@ -616,7 +691,7 @@ func logMiddleware() gin.HandlerFunc {
 
 		// 如果是流式请求，只记录请求参数
 		if isStream {
-			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, nil, nil)
+			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, nil, nil, "", true)
 			c.Next()
 			return
 		}
@@ -630,7 +705,7 @@ func logMiddleware() gin.HandlerFunc {
 		// 解析响应体
 		var response interface{}
 		if err := json.Unmarshal(blw.body.Bytes(), &response); err == nil {
-			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, response, nil)
+			logger.LogRequest(c.Request.Method, c.Request.URL.Path, requestBody, response, nil, "", true)
 		}
 	}
 }

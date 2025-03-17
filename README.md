@@ -589,6 +589,55 @@ go run .
   }
   ```
 
+#### 4. 模型列表接口
+
+- 请求方法：GET
+- 请求路径：/v1/models
+- 请求头：
+
+  ```json
+  Authorization: your-generate-token
+  Content-Type: application/json
+  ```
+
+- 响应参数结构：
+
+  ```json
+  {
+    "object": "string",   // 对象类型，固定为"list"
+    "data": [             // 模型数据列表
+      {
+        "id": "string",      // 模型ID
+        "object": "string",  // 对象类型，固定为"model"
+        "created": number,   // 创建时间戳
+        "owned_by": "string" // 模型所有者
+      }
+    ]
+  }
+  ```
+
+- 响应示例：
+
+  ```json
+  {
+    "object": "list",
+    "data": [
+      {
+        "id": "llama2",
+        "object": "model",
+        "created": 1677610602,
+        "owned_by": "ollama"
+      },
+      {
+        "id": "deepseek-r1:32b",
+        "object": "model",
+        "created": 1677649963,
+        "owned_by": "ollama"
+      }
+    ]
+  }
+  ```
+
 ## 部署方式
 
 ### Docker 部署
@@ -628,7 +677,7 @@ go build -o ollama-proxy
 
 2. **无法连接到 Ollama 服务**
    - 检查 Ollama 服务是否正常运行
-   - 确认 `config.yaml` 中的 `base_url` 配置是否正确（默认为 "http://localhost:11434"）
+   - 确认 `config.yaml` 中的 `base_url` 配置是否正确（默认为 "<http://localhost:11434"）>
    - 系统会返回 "Failed to connect to Ollama service" 的错误信息
 
 3. **流式输出不正常**
