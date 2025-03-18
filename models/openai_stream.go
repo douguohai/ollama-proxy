@@ -1,6 +1,8 @@
-package main
+package models
 
-import "time"
+import (
+	"time"
+)
 
 // ConvertOllamaChatStreamResponse 将Ollama流式响应转换为OpenAI格式
 func ConvertOllamaChatStreamResponse(ollamaResp map[string]interface{}, model string) StreamOpenAIChatResponse {

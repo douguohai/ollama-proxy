@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/douguohai/ollama-proxy/models"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/douguohai/ollama-proxy/base"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -31,12 +33,12 @@ const (
 	configFile = "config.yaml"
 )
 
-var logger *Logger
+var logger *base.Logger
 
 func main() {
 	// 初始化日志记录器
 	var err error
-	logger, err = NewLogger()
+	logger, err = base.NewLogger()
 	if err != nil {
 		panic(err)
 	}
@@ -168,7 +170,7 @@ func authMiddleware(config Config) gin.HandlerFunc {
 // proxyOllama 创建一个代理处理函数
 // OpenAI风格的API处理函数
 func handleOpenAIChat(c *gin.Context) {
-	var openAIReq OpenAIChatRequest
+	var openAIReq models.OpenAIChatRequest
 	if err := c.ShouldBindJSON(&openAIReq); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"error": err.Error(),
@@ -177,7 +179,7 @@ func handleOpenAIChat(c *gin.Context) {
 	}
 
 	// 转换为Ollama请求格式
-	ollamaReq := OllamaChatRequest{
+	ollamaReq := models.OllamaChatRequest{
 		Model:    openAIReq.Model,
 		Messages: openAIReq.Messages,
 		Stream:   openAIReq.Stream,
@@ -250,7 +252,7 @@ func handleOpenAIChat(c *gin.Context) {
 			}
 
 			// 转换为OpenAI流式响应格式
-			openaiResp := ConvertOllamaChatStreamResponse(result, ollamaReq.Model)
+			openaiResp := models.ConvertOllamaChatStreamResponse(result, ollamaReq.Model)
 			jsonData, err := json.Marshal(openaiResp)
 			if err != nil {
 				c.SSEvent("error", gin.H{"error": err.Error()})
@@ -286,12 +288,12 @@ func handleOpenAIChat(c *gin.Context) {
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaChatResponse(resp, openAIReq.Model)
+	openaiResp := models.ConvertOllamaChatResponse(resp, openAIReq.Model)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
 func handleOpenAICompletion(c *gin.Context) {
-	var openAIReq OpenAICompletionRequest
+	var openAIReq models.OpenAICompletionRequest
 	if err := c.ShouldBindJSON(&openAIReq); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"error": err.Error(),
@@ -300,7 +302,7 @@ func handleOpenAICompletion(c *gin.Context) {
 	}
 
 	// 转换为Ollama请求格式
-	ollamaReq := OllamaGenerateRequest{
+	ollamaReq := models.OllamaGenerateRequest{
 		Model:   openAIReq.Model,
 		Prompt:  openAIReq.Prompt,
 		Stream:  openAIReq.Stream,
@@ -373,7 +375,7 @@ func handleOpenAICompletion(c *gin.Context) {
 			}
 
 			// 转换为OpenAI流式响应格式
-			openaiResp := ConvertOllamaGenerateStreamResponse(result, ollamaReq.Model)
+			openaiResp := models.ConvertOllamaGenerateStreamResponse(result, ollamaReq.Model)
 			jsonData, err := json.Marshal(openaiResp)
 			if err != nil {
 				c.SSEvent("error", gin.H{"error": err.Error()})
@@ -409,12 +411,12 @@ func handleOpenAICompletion(c *gin.Context) {
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaGenerateResponse(resp, openAIReq.Model)
+	openaiResp := models.ConvertOllamaGenerateResponse(resp, openAIReq.Model)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
 func handleOpenAIEmbedding(c *gin.Context) {
-	var req OpenAIEmbeddingRequest
+	var req models.OpenAIEmbeddingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"error": err.Error(),
@@ -423,7 +425,7 @@ func handleOpenAIEmbedding(c *gin.Context) {
 	}
 
 	// 直接将OpenAI请求中的输入数组传递给Ollama
-	ollamaReq := OllamaEmbeddingRequest{
+	ollamaReq := models.OllamaEmbeddingRequest{
 		Model: req.Model,
 		Input: req.Input,
 	}
@@ -467,7 +469,7 @@ func handleOpenAIEmbedding(c *gin.Context) {
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaEmbeddingResponse(combinedResp, req.Model)
+	openaiResp := models.ConvertOllamaEmbeddingResponse(combinedResp, req.Model)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
@@ -491,7 +493,7 @@ func handleOpenAIModels(c *gin.Context) {
 	}
 
 	// 转换为OpenAI响应格式
-	openaiResp := ConvertOllamaModelsResponse(resp)
+	openaiResp := models.ConvertOllamaModelsResponse(resp)
 	c.JSON(http.StatusOK, openaiResp)
 }
 
