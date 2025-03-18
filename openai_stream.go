@@ -3,14 +3,14 @@ package main
 import "time"
 
 // ConvertOllamaChatStreamResponse 将Ollama流式响应转换为OpenAI格式
-func ConvertOllamaChatStreamResponse(ollamaResp map[string]interface{}, model string) OpenAIChatResponse {
+func ConvertOllamaChatStreamResponse(ollamaResp map[string]interface{}, model string) StreamOpenAIChatResponse {
 
-	return OpenAIChatResponse{
+	return StreamOpenAIChatResponse{
 		ID:      generateResponseID(),
 		Object:  "chat.completion.chunk",
 		Created: time.Now().Unix(),
 		Model:   model,
-		Choices: []ChatChoice{
+		Choices: []StreamChatChoice{
 			{
 				Message: ChatMessage{
 					Role:    "assistant",
@@ -24,13 +24,13 @@ func ConvertOllamaChatStreamResponse(ollamaResp map[string]interface{}, model st
 }
 
 // ConvertOllamaGenerateStreamResponse 将Ollama流式响应转换为OpenAI格式
-func ConvertOllamaGenerateStreamResponse(ollamaResp map[string]interface{}, model string) OpenAICompletionResponse {
-	return OpenAICompletionResponse{
+func ConvertOllamaGenerateStreamResponse(ollamaResp map[string]interface{}, model string) StreamOpenAICompletionResponse {
+	return StreamOpenAICompletionResponse{
 		ID:      generateResponseID(),
 		Object:  "text_completion.chunk",
 		Created: time.Now().Unix(),
 		Model:   model,
-		Choices: []Choice{
+		Choices: []StreamChoice{
 			{
 				Text:         ollamaResp["response"].(string),
 				Index:        0,

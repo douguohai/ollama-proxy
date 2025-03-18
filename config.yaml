@@ -8,5 +8,5 @@ auth:
 # 服务配置
 service:
   # Ollama服务的基础URL
-  # base_url: "http://192.168.10.129:11434"
-  base_url: "http://localhost:11434"
+   base_url: "http://192.168.10.129:11434"
+#  base_url: "http://localhost:11434"

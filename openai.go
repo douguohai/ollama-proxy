@@ -92,6 +92,16 @@ type OpenAIChatResponse struct {
 	Choices []ChatChoice `json:"choices"`
 }
 
+// StreamOpenAIChatResponse OpenAI风格的聊天响应
+type StreamOpenAIChatResponse struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Usage   Usage              `json:"usage"`
+	Choices []StreamChatChoice `json:"choices"`
+}
+
 // OpenAICompletionResponse OpenAI风格的生成响应
 type OpenAICompletionResponse struct {
 	ID      string   `json:"id"`
@@ -100,6 +110,16 @@ type OpenAICompletionResponse struct {
 	Model   string   `json:"model"`
 	Usage   Usage    `json:"usage"`
 	Choices []Choice `json:"choices"`
+}
+
+// StreamOpenAICompletionResponse OpenAI风格的生成响应
+type StreamOpenAICompletionResponse struct {
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Usage   Usage          `json:"usage"`
+	Choices []StreamChoice `json:"choices"`
 }
 
 // OpenAIEmbeddingResponse OpenAI风格的Embedding响应
@@ -124,8 +144,23 @@ type ChatChoice struct {
 	FinishReason string      `json:"finish_reason"`
 }
 
+// StreamChatChoice 聊天响应选项
+type StreamChatChoice struct {
+	Index        int         `json:"index"`
+	Message      ChatMessage `json:"delta"`
+	FinishReason string      `json:"finish_reason"`
+}
+
 // Choice 响应选项
 type Choice struct {
+	Text         string    `json:"text"`
+	Index        int       `json:"index"`
+	Logprobs     *Logprobs `json:"logprobs,omitempty"`
+	FinishReason string    `json:"finish_reason"`
+}
+
+// StreamChoice 响应选项
+type StreamChoice struct {
 	Text         string    `json:"text"`
 	Index        int       `json:"index"`
 	Logprobs     *Logprobs `json:"logprobs,omitempty"`
